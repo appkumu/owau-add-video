@@ -2,80 +2,158 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Owau — Add Creator Video</title>
 <style>
-  html, body { margin: 0; padding: 0; background: black; height: 100%; overflow: hidden; }
-  iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
-  #instagram-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow-y: auto; background: black; display: flex; align-items: center; justify-content: center; }
+  body { font-family: -apple-system, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 20px; background: #0d0d17; color: #eee; }
+  h1 { font-size: 20px; }
+  label { display: block; margin-top: 16px; font-size: 13px; color: #aaa; }
+  input, select, textarea { width: 100%; padding: 10px; margin-top: 4px; border-radius: 8px; border: 1px solid #444; background: #1a1a2a; color: #eee; box-sizing: border-box; font-size: 15px; }
+  button { margin-top: 20px; padding: 12px 20px; border-radius: 8px; border: none; background: #d4af6a; color: #1a1a2a; font-weight: 600; font-size: 15px; width: 100%; cursor: pointer; }
+  button:disabled { opacity: 0.5; }
+  #status { margin-top: 16px; padding: 10px; border-radius: 8px; font-size: 14px; display: none; }
+  .success { background: #1a3a1a; color: #8f8; display: block !important; }
+  .error { background: #3a1a1a; color: #f88; display: block !important; }
+  .preview { margin-top: 16px; padding: 12px; background: #1a1a2a; border-radius: 8px; font-size: 13px; word-break: break-all; }
 </style>
 </head>
 <body>
-<div id="youtube-container"></div>
-<div id="instagram-container" style="display:none;"></div>
+  <h1>Add Creator Video</h1>
 
+  <label>Platform</label>
+  <select id="platform">
+    <option value="youtube">YouTube</option>
+    <option value="instagram">Instagram</option>
+  </select>
+
+  <label>Post/Video URL</label>
+  <input id="url" placeholder="https://www.instagram.com/reel/... or https://youtube.com/watch?v=...">
+
+  <button id="fetchBtn" onclick="fetchEmbed()">Fetch Preview</button>
+
+  <div id="preview" class="preview" style="display:none;"></div>
+
+  <label>Creator Name</label>
+  <input id="creatorName" placeholder="e.g. The Gem Goddess">
+
+  <label>Creator Handle (optional)</label>
+  <input id="creatorHandle" placeholder="@handle">
+
+  <label>Creator Profile URL (optional)</label>
+  <input id="creatorProfileUrl" placeholder="https://instagram.com/handle">
+
+  <label>Video Title / Caption</label>
+  <input id="videoTitle" placeholder="Short title for the feed">
+
+  <label>Category</label>
+  <select id="category">
+    <option>Wealth & Abundance</option>
+    <option>Career & Purpose</option>
+    <option>Love & Relationships</option>
+    <option>Health & Body</option>
+    <option selected>Mindset & Growth</option>
+    <option>Peace & Wellbeing</option>
+  </select>
+
+  <label>Sample Start (seconds, YouTube only)</label>
+  <input id="startSeconds" type="number" value="0">
+
+  <button id="saveBtn" onclick="saveToSupabase()">Save to Owau</button>
+
+  <div id="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  // Reads platform + either (videoId/start/mute) for YouTube, or a
-  // Supabase row id for Instagram, from this page's own URL query params.
-  // This is a genuinely static file, which is why GitHub Pages (unlike
-  // Supabase Edge Functions, which don't support serving HTML at all)
-  // can serve it correctly as real, renderable HTML.
-  const params = new URLSearchParams(window.location.search);
-  const platform = params.get('platform') || 'youtube';
+  // Fill in your actual Supabase project URL and anon key here.
+  const SUPABASE_URL = "https://efidvkbdbdddfldkjois.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmaWR2a2JkYmRkZGZsZGtqb2lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NzU3OTYsImV4cCI6MjEwMDI1MTc5Nn0.q8x2-rN8Cl31dFIwOhs4P0kX1GTvj_Zen7t8w5x8sTs";
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  if (platform === 'instagram') {
-    loadInstagram(params.get('rowId'));
-  } else {
-    loadYouTube(params.get('videoId') || '', params.get('start') || '0', params.get('mute') || '1');
-  }
+  let fetchedEmbedHtml = null;
 
-  function loadYouTube(videoId, start, mute) {
-    const container = document.getElementById('youtube-container');
-    container.innerHTML =
-      '<iframe allow="autoplay; encrypted-media" allowfullscreen src="' +
-      'https://www.youtube-nocookie.com/embed/' + videoId +
-      '?start=' + start + '&autoplay=1&mute=' + mute + '&controls=0&playsinline=1&rel=0' +
-      '"></iframe>';
-  }
+  async function fetchEmbed() {
+    const platform = document.getElementById('platform').value;
+    const url = document.getElementById('url').value.trim();
+    const preview = document.getElementById('preview');
+    const status = document.getElementById('status');
+    status.className = ''; status.style.display = 'none';
 
-  // Fetches the embed_html for one row directly from Supabase using just
-  // the row's id — avoids ever needing to pass Instagram's full embed
-  // snippet (which includes quotes and a script tag) through a URL.
-  async function loadInstagram(rowId) {
-    const SUPABASE_URL = "https://efidvkbdbdddfldkjois.supabase.co";
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmaWR2a2JkYmRkZGZsZGtqb2lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NzU3OTYsImV4cCI6MjEwMDI1MTc5Nn0.q8x2-rN8Cl31dFIwOhs4P0kX1GTvj_Zen7t8w5x8sTs";
+    if (!url) { showError('Paste a URL first.'); return; }
 
-    const instaContainer = document.getElementById('instagram-container');
-    document.getElementById('youtube-container').style.display = 'none';
-    instaContainer.style.display = 'flex';
-
-    try {
-      const res = await fetch(
-        SUPABASE_URL + '/rest/v1/creator_videos?id=eq.' + rowId + '&select=embed_html',
-        { headers: { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY } }
-      );
-      const rows = await res.json();
-      const embedHtml = rows && rows[0] && rows[0].embed_html;
-      if (!embedHtml) {
-        instaContainer.innerHTML = '<p style="color:white;font-family:sans-serif;">Couldn\'t load this post.</p>';
-        return;
+    if (platform === 'instagram') {
+      try {
+        // Tokenless Meta oEmbed access (no App Review needed as of mid-2026).
+        const oembedUrl = `https://graph.facebook.com/v25.0/instagram_oembed?url=${encodeURIComponent(url)}`;
+        const res = await fetch(oembedUrl);
+        const data = await res.json();
+        if (data.error) { showError('Instagram fetch failed: ' + data.error.message); return; }
+        fetchedEmbedHtml = data.html;
+        preview.style.display = 'block';
+        preview.innerHTML = '<strong>Embed fetched successfully.</strong><br>Fill in the fields below and save.';
+      } catch (e) {
+        showError('Could not fetch Instagram embed: ' + e.message);
       }
-
-      // Injecting via innerHTML alone does not execute the <script> tag
-      // Instagram's embed HTML includes (browsers don't run scripts added
-      // this way) — so the blockquote markup and the script are inserted
-      // separately, with the script recreated as a real element so it
-      // actually runs and converts the blockquote into the live embed.
-      instaContainer.innerHTML = embedHtml;
-      const oldScript = instaContainer.querySelector('script');
-      if (oldScript) {
-        const newScript = document.createElement('script');
-        newScript.async = true;
-        newScript.src = oldScript.src || 'https://www.instagram.com/embed.js';
-        oldScript.remove();
-        document.body.appendChild(newScript);
-      }
-    } catch (e) {
-      instaContainer.innerHTML = '<p style="color:white;font-family:sans-serif;">Couldn\'t load this post.</p>';
+    } else {
+      // YouTube: just extract the video ID, no fetch needed — your app
+      // builds the embed itself from the ID.
+      const match = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+      if (!match) { showError('Could not find a YouTube video ID in that URL.'); return; }
+      fetchedEmbedHtml = null;
+      preview.style.display = 'block';
+      preview.innerHTML = '<strong>Video ID found:</strong> ' + match[1];
     }
+  }
+
+  async function saveToSupabase() {
+    const platform = document.getElementById('platform').value;
+    const url = document.getElementById('url').value.trim();
+    const creatorName = document.getElementById('creatorName').value.trim();
+    const creatorHandle = document.getElementById('creatorHandle').value.trim() || null;
+    const creatorProfileUrl = document.getElementById('creatorProfileUrl').value.trim() || null;
+    const videoTitle = document.getElementById('videoTitle').value.trim();
+    const category = document.getElementById('category').value;
+    const startSeconds = parseInt(document.getElementById('startSeconds').value || '0', 10);
+
+    if (!url || !creatorName || !videoTitle) {
+      showError('URL, Creator Name, and Video Title are required.');
+      return;
+    }
+
+    const row = {
+      platform: platform,
+      source_url: url,
+      youtube_url: platform === 'youtube' ? url : null,
+      embed_html: platform === 'instagram' ? fetchedEmbedHtml : null,
+      creator_name: creatorName,
+      creator_handle: creatorHandle,
+      creator_profile_url: creatorProfileUrl,
+      video_title: videoTitle,
+      category: category,
+      sample_start_seconds: startSeconds,
+      sort_order: Math.floor(Date.now() / 1000)
+    };
+
+    const { error } = await supabaseClient.from('creator_videos').insert(row);
+    if (error) {
+      showError('Save failed: ' + error.message);
+    } else {
+      showSuccess('Saved! It will show up in the app feed right away.');
+      document.getElementById('url').value = '';
+      document.getElementById('creatorName').value = '';
+      document.getElementById('creatorHandle').value = '';
+      document.getElementById('creatorProfileUrl').value = '';
+      document.getElementById('videoTitle').value = '';
+      document.getElementById('preview').style.display = 'none';
+      fetchedEmbedHtml = null;
+    }
+  }
+
+  function showError(msg) {
+    const s = document.getElementById('status');
+    s.className = 'error'; s.textContent = msg;
+  }
+  function showSuccess(msg) {
+    const s = document.getElementById('status');
+    s.className = 'success'; s.textContent = msg;
   }
 </script>
 </body>
