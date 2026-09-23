@@ -22,26 +22,25 @@
   <label>Platform</label>
   <select id="platform">
     <option value="tiktok">TikTok</option>
-    <option value="instagram">Instagram</option>
   </select>
 
   <label>Post/Video URL</label>
-  <input id="url" placeholder="https://www.tiktok.com/@user/video/... or https://www.instagram.com/reel/...">
+  <input id="url" placeholder="https://www.tiktok.com/@user/video/...">
 
-  <button id="fetchBtn" onclick="fetchEmbed()">Fetch Preview</button>
+  <button id="fetchBtn" onclick="fetchEmbed()">Fetch Creator Info Automatically</button>
 
   <div id="preview" class="preview" style="display:none;"></div>
 
-  <label>Creator Name</label>
+  <label>Creator Name (auto-filled — edit if needed)</label>
   <input id="creatorName" placeholder="e.g. The Gem Goddess">
 
-  <label>Creator Handle (optional)</label>
+  <label>Creator Handle (auto-filled — edit if needed)</label>
   <input id="creatorHandle" placeholder="@handle">
 
-  <label>Creator Profile URL (optional)</label>
-  <input id="creatorProfileUrl" placeholder="https://instagram.com/handle">
+  <label>Creator Profile URL (auto-filled — edit if needed)</label>
+  <input id="creatorProfileUrl" placeholder="https://tiktok.com/@handle">
 
-  <label>Video Title / Caption</label>
+  <label>Video Title / Caption (auto-filled — edit if needed)</label>
   <input id="videoTitle" placeholder="Short title for the feed">
 
   <label>Category</label>
@@ -68,10 +67,7 @@
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVmaWR2a2JkYmRkZGZsZGtqb2lzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2NzU3OTYsImV4cCI6MjEwMDI1MTc5Nn0.q8x2-rN8Cl31dFIwOhs4P0kX1GTvj_Zen7t8w5x8sTs";
   const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  let fetchedEmbedHtml = null;
-
   async function fetchEmbed() {
-    const platform = document.getElementById('platform').value;
     const url = document.getElementById('url').value.trim();
     const preview = document.getElementById('preview');
     const status = document.getElementById('status');
@@ -79,28 +75,29 @@
 
     if (!url) { showError('Paste a URL first.'); return; }
 
-    if (platform === 'instagram') {
-      try {
-        // Tokenless Meta oEmbed access (no App Review needed as of mid-2026).
-        const oembedUrl = `https://graph.facebook.com/v25.0/instagram_oembed?url=${encodeURIComponent(url)}`;
-        const res = await fetch(oembedUrl);
-        const data = await res.json();
-        if (data.error) { showError('Instagram fetch failed: ' + data.error.message); return; }
-        fetchedEmbedHtml = data.html;
-        preview.style.display = 'block';
-        preview.innerHTML = '<strong>Embed fetched successfully.</strong><br>Fill in the fields below and save.';
-      } catch (e) {
-        showError('Could not fetch Instagram embed: ' + e.message);
-      }
-    } else if (platform === 'tiktok') {
-      // TikTok: just extract the post ID from the URL, no fetch needed —
-      // the app builds the embed itself from the ID via TikTok's official
-      // player at tiktok.com/player/v1/{id}.
-      const match = url.match(/\/video\/(\d+)/);
-      if (!match) { showError('Could not find a TikTok post ID in that URL.'); return; }
-      fetchedEmbedHtml = null;
+    // TikTok's official oEmbed endpoint (separate from the player we use
+    // for actual playback) returns title, author_name and author_url for
+    // a given video URL, following the standard oembed.com spec — this
+    // lets us auto-fill the creator/title fields instead of typing them
+    // by hand each time.
+    try {
+      const res = await fetch('https://www.tiktok.com/oembed?url=' + encodeURIComponent(url));
+      if (!res.ok) { showError('TikTok oEmbed request failed (is this a valid, public video URL?).'); return; }
+      const data = await res.json();
+
+      document.getElementById('creatorName').value = data.author_name || '';
+      document.getElementById('creatorProfileUrl').value = data.author_url || '';
+      document.getElementById('videoTitle').value = data.title || '';
+
+      // author_url looks like https://www.tiktok.com/@username — pull
+      // just the @username part out as the handle.
+      const handleMatch = (data.author_url || '').match(/@([\w.]+)/);
+      document.getElementById('creatorHandle').value = handleMatch ? '@' + handleMatch[1] : '';
+
       preview.style.display = 'block';
-      preview.innerHTML = '<strong>Post ID found:</strong> ' + match[1];
+      preview.innerHTML = '<strong>Fetched successfully.</strong> Fields below are filled in — just pick a category and save.';
+    } catch (e) {
+      showError('Could not fetch TikTok metadata: ' + e.message);
     }
   }
 
@@ -122,7 +119,6 @@
     const row = {
       platform: platform,
       source_url: url,
-      embed_html: platform === 'instagram' ? fetchedEmbedHtml : null,
       creator_name: creatorName,
       creator_handle: creatorHandle,
       creator_profile_url: creatorProfileUrl,
@@ -143,7 +139,6 @@
       document.getElementById('creatorProfileUrl').value = '';
       document.getElementById('videoTitle').value = '';
       document.getElementById('preview').style.display = 'none';
-      fetchedEmbedHtml = null;
     }
   }
 
